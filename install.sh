@@ -902,11 +902,13 @@ optimize_performance() {
         fi
     fi
 
-    # [5] 系统 TCP 缓冲区
-    local rmem
+    # [5] 系统 TCP 全面优化（检测 fq+BBR+缓冲区，任一未到位则触发）
+    local rmem cur_qdisc cur_cc
     rmem=$(sysctl -n net.core.rmem_max 2>/dev/null)
-    if [[ -z "$rmem" || "$rmem" -lt 67108864 ]]; then
-        items+=("[5] 系统 TCP 缓冲区: → 128MB（提升大带宽下的吞吐量）")
+    cur_qdisc=$(sysctl -n net.core.default_qdisc 2>/dev/null)
+    cur_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+    if [[ -z "$rmem" || "$rmem" -lt 134217728 || "$cur_qdisc" != "fq" || "$cur_cc" != "bbr" ]]; then
+        items+=("[5] 系统 TCP 全面优化: BBR+fq+缓冲区128MB+连接调优（代理性能关键参数）")
         do_sysctl=true
     fi
 
@@ -958,15 +960,61 @@ optimize_performance() {
         fi
 
         if [[ "$do_sysctl" == true ]]; then
-            sed -i '/net\.core\.rmem_max/d;/net\.core\.wmem_max/d;/net\.ipv4\.tcp_rmem/d;/net\.ipv4\.tcp_wmem/d' /etc/sysctl.conf
-            {
-                echo "net.core.rmem_max = 134217728"
-                echo "net.core.wmem_max = 134217728"
-                echo "net.ipv4.tcp_rmem = 4096 87380 134217728"
-                echo "net.ipv4.tcp_wmem = 4096 65536 134217728"
-            } >>/etc/sysctl.conf
-            sysctl -p >/dev/null 2>&1
-            echo -e "${OK} ${GreenBG} [5] 系统 TCP 缓冲区 → 128MB ${Font}"
+            # 清除旧条目，写入专属配置文件（优先级高于 sysctl.conf）
+            local sysctl_file="/etc/sysctl.d/99-v2ray-optimize.conf"
+            cat >"$sysctl_file" <<'SYSCTL'
+# V2Ray 节点网络性能优化 - 由 install.sh 自动生成
+
+# BBR 拥塞控制（配合 fq 队列才能充分发挥 BBR 效果）
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# TCP 缓冲区（128MB，适合跨境高延迟链路）
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.core.rmem_default = 1048576
+net.core.wmem_default = 1048576
+net.ipv4.tcp_rmem = 4096 87380 134217728
+net.ipv4.tcp_wmem = 4096 65536 134217728
+net.ipv4.tcp_mem = 786432 1048576 26777216
+
+# 连接队列
+net.ipv4.tcp_max_syn_backlog = 8192
+net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 30000
+
+# 代理长连接关键：禁止空闲后慢启动
+net.ipv4.tcp_slow_start_after_idle = 0
+
+# TIME_WAIT 复用与回收
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
+net.ipv4.tcp_max_tw_buckets = 6000
+
+# Keepalive（保持代理连接活跃）
+net.ipv4.tcp_keepalive_time = 300
+net.ipv4.tcp_keepalive_probes = 5
+net.ipv4.tcp_keepalive_intvl = 15
+
+# TCP Fast Open（双向）
+net.ipv4.tcp_fastopen = 3
+
+# MTU 自动探测
+net.ipv4.tcp_mtu_probing = 1
+
+# 可靠性选项（现代内核默认已开启，显式确认）
+net.ipv4.tcp_sack = 1
+net.ipv4.tcp_timestamps = 1
+net.ipv4.tcp_window_scaling = 1
+
+# 本地端口范围与文件描述符
+net.ipv4.ip_local_port_range = 1024 65535
+net.ipv4.tcp_max_orphans = 32768
+fs.file-max = 1000000
+SYSCTL
+            modprobe tcp_bbr 2>/dev/null || true
+            sysctl --system >/dev/null 2>&1
+            echo -e "${OK} ${GreenBG} [5] 系统 TCP 参数已全面优化（BBR+fq+缓冲区+连接调优）${Font}"
         fi
 
         local nginx_ok=true
