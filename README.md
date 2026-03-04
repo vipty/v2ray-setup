@@ -22,54 +22,28 @@
 
 ## 快速开始
 
-### 远程一键安装（推荐）
-
-无需提前下载脚本，直接在服务器上运行：
+### 标准安装（推荐）
 
 ```bash
-bash <(curl -L https://raw.githubusercontent.com/vipty/v2ray-setup/main/install.sh) --host your.domain.com --mode ws
+wget -O install.sh https://raw.githubusercontent.com/vipty/v2ray-setup/main/install.sh && bash install.sh
 ```
 
-**命令解析：**
-
-```
-bash <(curl -L https://raw.githubusercontent.com/vipty/v2ray-setup/main/install.sh) --host your.domain.com --mode ws
-│     │   └─ -L：跟随重定向，自动处理 GitHub 跳转         │                   │
-│     └─ 进程替换：将 curl 下载的内容作为脚本文件传给 bash  │                   │
-│        等价于先下载到临时文件再执行，但不会在磁盘留文件    │                   │
-│                                                          │                   └─ 安装模式：ws = Nginx+WebSocket+TLS
-└─ 用 bash 执行下载到的脚本                                 └─ 指定域名，跳过交互式输入
-```
-
-| 部分 | 说明 |
-|------|------|
-| `curl -L <url>` | 从 GitHub 下载 install.sh 脚本内容，`-L` 自动跟随 302 跳转 |
-| `bash <(...)` | 进程替换语法，将括号内命令的输出作为文件传给 bash 执行，**脚本不落盘** |
-| `--host your.domain.com` | 预设域名，安装时跳过交互输入步骤 |
-| `--mode ws` | 直接进入 WS+TLS 安装流程，跳过菜单选择（可选 `ws` 或 `h2`）|
-
-> 将 `your.domain.com` 替换为已解析到本机 IP 的真实域名。
-
-HTTP/2 模式：
+非交互一键安装（指定域名和模式，跳过所有菜单）：
 
 ```bash
-bash <(curl -L https://raw.githubusercontent.com/vipty/v2ray-setup/main/install.sh) --host your.domain.com --mode h2
-```
-
----
-
-### 下载后本地运行
-
-```bash
-# 下载脚本
-curl -L https://raw.githubusercontent.com/vipty/v2ray-setup/main/install.sh -o install.sh
-
-# 交互菜单模式
-bash install.sh
-
-# 非交互模式
+wget -O install.sh https://raw.githubusercontent.com/vipty/v2ray-setup/main/install.sh
 bash install.sh --host your.domain.com --mode ws
 ```
+
+> 将 `your.domain.com` 替换为已解析到本机 IP 的真实域名，`--mode ws` 可改为 `--mode h2`。
+
+**参数说明：**
+
+| 参数 | 说明 |
+|------|------|
+| `--host your.domain.com` | 预设域名，安装时跳过交互输入 |
+| `--mode ws` | WS+TLS 模式（Nginx 反代，推荐）|
+| `--mode h2` | HTTP/2 模式（V2Ray 直接监听）|
 
 ---
 
