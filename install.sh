@@ -29,7 +29,7 @@ OK="${Green}[OK]${Font}"
 Error="${Red}[错误]${Font}"
 
 # 版本
-shell_version="1.1.9.0"
+shell_version="1.2.0.0"
 shell_mode="None"
 github_branch="master"
 # 自有仓库（主源，vipty/v2ray-setup）：减少对个人仓库的依赖，长期可用
