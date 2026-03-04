@@ -880,8 +880,8 @@ optimize_performance() {
         fi
     fi
 
-    # [2] TCP 延迟优化
-    if [[ -f "$main_conf" ]] && ! grep -q 'tcp_nodelay[[:space:]]*on' "$main_conf" 2>/dev/null; then
+    # [2] TCP 延迟优化（只要文件里有 tcp_nodelay 任意形式都跳过）
+    if [[ -f "$main_conf" ]] && ! grep -q 'tcp_nodelay' "$main_conf" 2>/dev/null; then
         items+=("[2] Nginx TCP优化: 添加 tcp_nodelay + tcp_nopush（降低延迟，减少小包碎片）")
         do_tcp=true
     fi
@@ -969,17 +969,20 @@ optimize_performance() {
             echo -e "${OK} ${GreenBG} [5] 系统 TCP 缓冲区 → 128MB ${Font}"
         fi
 
+        local nginx_ok=true
         if [[ "$nginx_changed" == true && -f "/etc/nginx/sbin/nginx" ]]; then
             if /etc/nginx/sbin/nginx -t -c "$main_conf" >/dev/null 2>&1; then
                 /etc/nginx/sbin/nginx -s reload >/dev/null 2>&1 || systemctl restart nginx
                 echo -e "${OK} ${GreenBG} Nginx 已重新加载 ${Font}"
             else
-                echo -e "${Error} ${RedBG} Nginx 配置语法检查失败，请手动排查：${Font}"
+                nginx_ok=false
+                echo -e "${Error} ${RedBG} Nginx 配置语法检查失败，其他优化已生效，请手动修复 Nginx 配置：${Font}"
                 /etc/nginx/sbin/nginx -t -c "$main_conf"
             fi
         fi
 
-        echo -e "${OK} ${GreenBG} 性能优化完成 ${Font}"
+        [[ "$nginx_ok" == true ]] && echo -e "${OK} ${GreenBG} 性能优化完成 ${Font}" || \
+            echo -e "${Error} ${RedBG} 优化部分完成，Nginx 配置需手动修复后执行: /etc/nginx/sbin/nginx -s reload ${Font}"
         ;;
     *)
         echo -e "${OK} ${GreenBG} 已跳过，可通过菜单选项 20 随时运行优化检测 ${Font}"
