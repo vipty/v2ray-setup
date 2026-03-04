@@ -248,23 +248,40 @@ bash install.sh uninstall
 
 修改脚本后需要推送到 GitHub，远程一键安装命令才能使用最新版本。
 
+### 背景：本地仓库结构
+
+本地 git 根目录是 `/Users/amking/python-soft`（多项目 monorepo），`install.sh` 位于其中的 `server-fq/` 子目录。GitHub 上 `vipty/v2ray-setup` 仓库的根目录直接存放 `install.sh`，因此推送时需要用 `git subtree` 把子目录映射为远程根目录。
+
 ### 日常推送流程
 
 ```bash
-cd /Users/amking/python-soft/server-fq
+# 切换到 monorepo 根目录
+cd /Users/amking/python-soft
 
 # 查看修改了哪些文件
 git status
 
 # 暂存要提交的文件
-git add install.sh
-git add README.md          # 如果文档也有修改
+git add server-fq/install.sh
+git add server-fq/README.md   # 如果文档也有修改
 
 # 提交（引号内填写本次修改的简要说明）
 git commit -m "描述本次修改内容"
 
-# 推送到 GitHub
-git push
+# 推送 server-fq/ 子目录内容到 vipty/v2ray-setup 仓库根目录
+git subtree push --prefix=server-fq v2ray-setup main
+```
+
+> 首次使用前需添加远程地址（只需执行一次）：
+> ```bash
+> git remote add v2ray-setup https://github.com/vipty/v2ray-setup.git
+> ```
+
+### 推送被拒绝时（远程有新提交）
+
+```bash
+# 强制覆盖远程（确认远程没有需要保留的内容再执行）
+git push v2ray-setup $(git subtree split --prefix=server-fq):main --force
 ```
 
 ### 推送后验证
