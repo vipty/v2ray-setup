@@ -320,11 +320,19 @@ v2ray_install() {
     if [[ -d /etc/v2ray ]]; then
         rm -rf /etc/v2ray
     fi
+    # 备份旧服务文件：v2fly 安装器在"已是最新版"时会跳过，不会重建服务文件
+    [[ -f "$v2ray_systemd_file" ]] && cp "$v2ray_systemd_file" "${v2ray_systemd_file}.bak"
     rm -rf $v2ray_systemd_file
     systemctl daemon-reload
 
     # 主安装源：v2fly 官方安装脚本（官方维护，长期稳定）
     if bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh); then
+        # 安装器跳过时服务文件不会重建，从备份恢复
+        if [[ ! -f "$v2ray_systemd_file" && -f "${v2ray_systemd_file}.bak" ]]; then
+            cp "${v2ray_systemd_file}.bak" "$v2ray_systemd_file"
+            systemctl daemon-reload
+            echo -e "${OK} ${GreenBG} 已是最新版，从备份恢复服务文件 ${Font}"
+        fi
         judge "安装 V2ray (v2fly 官方)"
     else
         # 备用安装源：wulabing 脚本
