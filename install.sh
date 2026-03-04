@@ -622,7 +622,9 @@ EOF
 
 start_process_systemd() {
     systemctl daemon-reload
-    chown -R root.root /var/log/v2ray/
+    # v2fly FHS 安装的服务以 nobody 用户运行，日志目录需对应权限
+    mkdir -p /var/log/v2ray
+    chown -R nobody:nogroup /var/log/v2ray/
     if [[ "$shell_mode" != "h2" ]]; then
         systemctl restart nginx
         judge "Nginx 启动"
