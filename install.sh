@@ -229,10 +229,10 @@ basic_optimization() {
 port_alterid_set() {
     # 端口默认 443：标准 HTTPS 端口，防火墙/运营商拦截概率最低，伪装性最强
     [[ -z ${port} ]] && port="443"
-    # alterID 默认 0：启用 VMessAEAD 加密模式，安全性更高，新版客户端均支持
-    [[ -z ${alterID} ]] && alterID="0"
+    # alterID 随机生成 1-32 之间的整数，避免固定值被识别
+    [[ -z ${alterID} ]] && alterID="$((RANDOM % 32 + 1))"
     echo -e "${OK} ${GreenBG} 连接端口: ${port}（推荐：标准HTTPS端口，穿透性最佳）${Font}"
-    echo -e "${OK} ${GreenBG} alterID: ${alterID}（推荐：启用VMessAEAD加密，安全性更强）${Font}"
+    echo -e "${OK} ${GreenBG} alterID: ${alterID}（随机生成，范围 1-32）${Font}"
 }
 modify_path() {
     sed -i "/\"path\"/c \\\t  \"path\":\"${camouflage}\"" ${v2ray_conf}
