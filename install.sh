@@ -854,9 +854,9 @@ ssl_update_manuel() {
 bbr_boost_sh() {
     [ -f "tcp.sh" ] && rm -rf ./tcp.sh
     # 主源：ylx2016 的网络加速脚本（第三方）
-    if ! wget -q -N --no-check-certificate "https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcp.sh" 2>/dev/null; then
+    if ! wget -q -O tcp.sh --no-check-certificate "https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcp.sh" 2>/dev/null; then
         # 备用：自有仓库镜像
-        wget -N --no-check-certificate "${self_repo_raw}/tools/tcp.sh"
+        wget -O tcp.sh --no-check-certificate "${self_repo_raw}/tools/tcp.sh"
     fi
     [[ -f tcp.sh ]] && chmod +x tcp.sh && ./tcp.sh
 }
