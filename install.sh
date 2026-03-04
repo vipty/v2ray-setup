@@ -540,7 +540,7 @@ acme() {
 }
 v2ray_conf_add() {
     local mode="$1"
-    cd /etc/v2ray || exit
+    cd "$v2ray_conf_dir" || exit
     # 主源：自有仓库（vipty/v2ray-setup），长期可用
     if ! wget -q --no-check-certificate "${self_repo_raw}/${mode}/config.json" -O config.json 2>/dev/null; then
         # 备用：wulabing 原始仓库
