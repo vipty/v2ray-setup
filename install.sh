@@ -861,6 +861,134 @@ bbr_boost_sh() {
     fi
     [[ -f "$tcp_script" ]] && chmod +x "$tcp_script" && bash "$tcp_script"
 }
+
+optimize_performance() {
+    local items=()
+    local do_workers=false do_tcp=false do_ssl_sess=false do_timeout=false do_sysctl=false
+    local main_conf="${nginx_dir}/conf/nginx.conf"
+
+    echo -e ""
+    echo -e "—————————————— 性能优化检测 ——————————————"
+
+    # [1] Nginx worker_connections
+    if [[ -f "$main_conf" ]]; then
+        local cur_wc
+        cur_wc=$(grep -oE 'worker_connections[[:space:]]+[0-9]+' "$main_conf" | grep -oE '[0-9]+' | head -1)
+        if [[ -n "$cur_wc" && "$cur_wc" -lt 8192 ]]; then
+            items+=("[1] Nginx 并发连接数: ${cur_wc} → 8192（提升高并发处理能力）")
+            do_workers=true
+        fi
+    fi
+
+    # [2] TCP 延迟优化
+    if [[ -f "$main_conf" ]] && ! grep -q 'tcp_nodelay[[:space:]]*on' "$main_conf" 2>/dev/null; then
+        items+=("[2] Nginx TCP优化: 添加 tcp_nodelay + tcp_nopush（降低延迟，减少小包碎片）")
+        do_tcp=true
+    fi
+
+    # [3] SSL 会话复用（仅 ws 模式有 nginx_conf）
+    if [[ -f "$nginx_conf" ]] && ! grep -q 'ssl_session_cache.*shared:SSL' "$nginx_conf" 2>/dev/null; then
+        items+=("[3] SSL 会话复用: 添加 ssl_session_cache 50m（减少握手次数，首字节提速）")
+        do_ssl_sess=true
+    fi
+
+    # [4] 代理超时
+    if [[ -f "$nginx_conf" ]]; then
+        local cur_to
+        cur_to=$(grep 'proxy_read_timeout' "$nginx_conf" | grep -oE '[0-9]+' | head -1)
+        if [[ -n "$cur_to" && "$cur_to" -gt 300 ]]; then
+            items+=("[4] 代理超时: ${cur_to}s → 180s（释放空闲连接资源）")
+            do_timeout=true
+        fi
+    fi
+
+    # [5] 系统 TCP 缓冲区
+    local rmem
+    rmem=$(sysctl -n net.core.rmem_max 2>/dev/null)
+    if [[ -z "$rmem" || "$rmem" -lt 67108864 ]]; then
+        items+=("[5] 系统 TCP 缓冲区: → 128MB（提升大带宽下的吞吐量）")
+        do_sysctl=true
+    fi
+
+    if [[ ${#items[@]} -eq 0 ]]; then
+        echo -e "${OK} ${GreenBG} 性能配置已是最优，无需调整 ${Font}"
+        echo -e "—————————————————————————————————————————"
+        return 0
+    fi
+
+    echo -e "${OK} ${GreenBG} 检测到 ${#items[@]} 项可优化配置：${Font}"
+    for item in "${items[@]}"; do
+        echo -e "    ${item}"
+    done
+    echo -e ""
+
+    read -rp "$(echo -e "${GreenBG} 是否立即应用以上优化？(Y/n): ${Font}")" opt_yn
+    [[ -z "$opt_yn" ]] && opt_yn="Y"
+
+    case $opt_yn in
+    [yY][eE][sS] | [yY])
+        local nginx_changed=false
+
+        if [[ "$do_workers" == true && -f "$main_conf" ]]; then
+            sed -i 's/worker_connections[[:space:]]*[0-9]*/worker_connections  8192/' "$main_conf"
+            echo -e "${OK} ${GreenBG} [1] worker_connections → 8192 ${Font}"
+            nginx_changed=true
+        fi
+
+        if [[ "$do_tcp" == true && -f "$main_conf" ]]; then
+            sed -i '/keepalive_timeout/a\    tcp_nodelay     on;' "$main_conf"
+            sed -i '/tcp_nodelay[[:space:]]*on/a\    tcp_nopush      on;' "$main_conf"
+            echo -e "${OK} ${GreenBG} [2] tcp_nodelay / tcp_nopush 已添加 ${Font}"
+            nginx_changed=true
+        fi
+
+        if [[ "$do_ssl_sess" == true && -f "$nginx_conf" ]]; then
+            sed -i '/ssl_stapling_verify/a\        ssl_session_cache   shared:SSL:50m;' "$nginx_conf"
+            sed -i '/ssl_session_cache/a\        ssl_session_timeout 1d;' "$nginx_conf"
+            echo -e "${OK} ${GreenBG} [3] SSL 会话缓存 50MB 已配置 ${Font}"
+            nginx_changed=true
+        fi
+
+        if [[ "$do_timeout" == true && -f "$nginx_conf" ]]; then
+            sed -i 's/proxy_read_timeout.*/proxy_read_timeout  180s;/' "$nginx_conf"
+            grep -q 'proxy_send_timeout' "$nginx_conf" || \
+                sed -i '/proxy_read_timeout/a\        proxy_send_timeout  180s;' "$nginx_conf"
+            echo -e "${OK} ${GreenBG} [4] 代理超时 → 180s ${Font}"
+            nginx_changed=true
+        fi
+
+        if [[ "$do_sysctl" == true ]]; then
+            sed -i '/net\.core\.rmem_max/d;/net\.core\.wmem_max/d;/net\.ipv4\.tcp_rmem/d;/net\.ipv4\.tcp_wmem/d' /etc/sysctl.conf
+            {
+                echo "net.core.rmem_max = 134217728"
+                echo "net.core.wmem_max = 134217728"
+                echo "net.ipv4.tcp_rmem = 4096 87380 134217728"
+                echo "net.ipv4.tcp_wmem = 4096 65536 134217728"
+            } >>/etc/sysctl.conf
+            sysctl -p >/dev/null 2>&1
+            echo -e "${OK} ${GreenBG} [5] 系统 TCP 缓冲区 → 128MB ${Font}"
+        fi
+
+        if [[ "$nginx_changed" == true && -f "/etc/nginx/sbin/nginx" ]]; then
+            if /etc/nginx/sbin/nginx -t -c "$main_conf" >/dev/null 2>&1; then
+                /etc/nginx/sbin/nginx -s reload >/dev/null 2>&1 || systemctl restart nginx
+                echo -e "${OK} ${GreenBG} Nginx 已重新加载 ${Font}"
+            else
+                echo -e "${Error} ${RedBG} Nginx 配置语法检查失败，请手动排查：${Font}"
+                /etc/nginx/sbin/nginx -t -c "$main_conf"
+            fi
+        fi
+
+        echo -e "${OK} ${GreenBG} 性能优化完成 ${Font}"
+        ;;
+    *)
+        echo -e "${OK} ${GreenBG} 已跳过，可通过菜单选项 20 随时运行优化检测 ${Font}"
+        ;;
+    esac
+    echo -e "—————————————————————————————————————————"
+    sleep 2
+}
+
 mtproxy_sh() {
     echo -e "${Error} ${RedBG} 功能维护，暂不可用 ${Font}"
 }
@@ -996,6 +1124,7 @@ install_v2ray_ws_tls() {
     start_process_systemd
     enable_process_systemd
     acme_cron_update
+    optimize_performance
 }
 install_v2_h2() {
     is_root
@@ -1107,7 +1236,8 @@ menu() {
     echo -e "${Green}15.${Font} 更新 证书crontab计划任务"
     echo -e "${Green}16.${Font} 清空 证书遗留文件"
     echo -e "${Green}17.${Font} 退出"
-    echo -e "${Green}19.${Font} 内核分析 & 一键启用 BBR 加速 \n"
+    echo -e "${Green}19.${Font} 内核分析 & 一键启用 BBR 加速"
+    echo -e "${Green}20.${Font} 性能优化检测 & 一键应用 \n"
 
     read -rp "请输入数字：" menu_num
     case $menu_num in
@@ -1193,6 +1323,9 @@ menu() {
         ;;
     19)
         check_kernel_and_recommend_bbr
+        ;;
+    20)
+        optimize_performance
         ;;
     *)
         echo -e "${RedBG}请输入正确的数字${Font}"
