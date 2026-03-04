@@ -32,8 +32,14 @@ Error="${Red}[错误]${Font}"
 shell_version="1.1.9.0"
 shell_mode="None"
 github_branch="master"
+# 自有仓库（主源，vipty/v2ray-setup）：减少对个人仓库的依赖，长期可用
+self_repo="vipty/v2ray-setup"
+self_repo_branch="main"
+self_repo_raw="https://raw.githubusercontent.com/${self_repo}/${self_repo_branch}"
+# wulabing 原始仓库（备用）
+wulabing_repo="wulabing/V2Ray_ws-tls_bash_onekey"
 version_cmp="/tmp/version_cmp.tmp"
-v2ray_conf_dir="/etc/v2ray"
+v2ray_conf_dir="/usr/local/etc/v2ray"
 nginx_conf_dir="/etc/nginx/conf/conf.d"
 v2ray_conf="${v2ray_conf_dir}/config.json"
 nginx_conf="${nginx_conf_dir}/v2ray.conf"
@@ -54,7 +60,6 @@ ssl_update_file="/usr/bin/ssl_update.sh"
 nginx_version="1.20.1"
 openssl_version="1.1.1k"
 jemalloc_version="5.2.1"
-old_config_status="off"
 # v2ray_plugin_version="$(wget -qO- "https://github.com/shadowsocks/v2ray-plugin/tags" | grep -E "/shadowsocks/v2ray-plugin/releases/tag/" | head -1 | sed -r 's/.*tag\/v(.+)\">.*/\1/')"
 
 #移动旧版本配置信息 对小于 1.1.0 版本适配
@@ -222,35 +227,24 @@ basic_optimization() {
 
 }
 port_alterid_set() {
-    if [[ "on" != "$old_config_status" ]]; then
-        # 端口默认 443：标准 HTTPS 端口，防火墙/运营商拦截概率最低，伪装性最强
-        [[ -z ${port} ]] && port="443"
-        # alterID 默认 0：启用 VMessAEAD 加密模式，安全性更高，新版客户端均支持
-        [[ -z ${alterID} ]] && alterID="0"
-        echo -e "${OK} ${GreenBG} 连接端口: ${port}（推荐：标准HTTPS端口，穿透性最佳）${Font}"
-        echo -e "${OK} ${GreenBG} alterID: ${alterID}（推荐：启用VMessAEAD加密，安全性更强）${Font}"
-    fi
+    # 端口默认 443：标准 HTTPS 端口，防火墙/运营商拦截概率最低，伪装性最强
+    [[ -z ${port} ]] && port="443"
+    # alterID 默认 0：启用 VMessAEAD 加密模式，安全性更高，新版客户端均支持
+    [[ -z ${alterID} ]] && alterID="0"
+    echo -e "${OK} ${GreenBG} 连接端口: ${port}（推荐：标准HTTPS端口，穿透性最佳）${Font}"
+    echo -e "${OK} ${GreenBG} alterID: ${alterID}（推荐：启用VMessAEAD加密，安全性更强）${Font}"
 }
 modify_path() {
-    if [[ "on" == "$old_config_status" ]]; then
-        camouflage="$(grep '\"path\"' $v2ray_qr_config_file | awk -F '"' '{print $4}')"
-    fi
     sed -i "/\"path\"/c \\\t  \"path\":\"${camouflage}\"" ${v2ray_conf}
     judge "V2ray 伪装路径 修改"
 }
 modify_alterid() {
-    if [[ "on" == "$old_config_status" ]]; then
-        alterID="$(grep '\"aid\"' $v2ray_qr_config_file | awk -F '"' '{print $4}')"
-    fi
     sed -i "/\"alterId\"/c \\\t  \"alterId\":${alterID}" ${v2ray_conf}
     judge "V2ray alterid 修改"
     [ -f ${v2ray_qr_config_file} ] && sed -i "/\"aid\"/c \\  \"aid\": \"${alterID}\"," ${v2ray_qr_config_file}
     echo -e "${OK} ${GreenBG} alterID:${alterID} ${Font}"
 }
 modify_inbound_port() {
-    if [[ "on" == "$old_config_status" ]]; then
-        port="$(info_extraction '\"port\"')"
-    fi
     if [[ "$shell_mode" != "h2" ]]; then
         PORT=$((RANDOM + 10000))
         sed -i "/\"port\"/c  \    \"port\":${PORT}," ${v2ray_conf}
@@ -261,18 +255,12 @@ modify_inbound_port() {
 }
 modify_UUID() {
     [ -z "$UUID" ] && UUID=$(cat /proc/sys/kernel/random/uuid)
-    if [[ "on" == "$old_config_status" ]]; then
-        UUID="$(info_extraction '\"id\"')"
-    fi
     sed -i "/\"id\"/c \\\t  \"id\":\"${UUID}\"," ${v2ray_conf}
     judge "V2ray UUID 修改"
     [ -f ${v2ray_qr_config_file} ] && sed -i "/\"id\"/c \\  \"id\": \"${UUID}\"," ${v2ray_qr_config_file}
     echo -e "${OK} ${GreenBG} UUID:${UUID} ${Font}"
 }
 modify_nginx_port() {
-    if [[ "on" == "$old_config_status" ]]; then
-        port="$(info_extraction '\"port\"')"
-    fi
     sed -i "/ssl http2;$/c \\\tlisten ${port} ssl http2;" ${nginx_conf}
     sed -i "3c \\\tlisten [::]:${port} http2;" ${nginx_conf}
     judge "V2ray port 修改"
@@ -289,10 +277,41 @@ modify_nginx_other() {
 web_camouflage() {
     ##请注意 这里和LNMP脚本的默认路径冲突，千万不要在安装了LNMP的环境下使用本脚本，否则后果自负
     rm -rf /home/wwwroot
-    mkdir -p /home/wwwroot
+    mkdir -p /home/wwwroot/3DCEList
     cd /home/wwwroot || exit
-    git clone https://github.com/wulabing/3DCEList.git
-    judge "web 站点伪装"
+    # 主源：wulabing 的伪装站点仓库（个人维护，有停止风险）
+    if git clone https://github.com/wulabing/3DCEList.git 2>/dev/null; then
+        echo -e "${OK} ${GreenBG} web 站点伪装 完成 ${Font}"
+    else
+        # 备用：内置最简伪装页，不依赖任何外部仓库
+        echo -e "${Error} ${RedBG} 伪装站点拉取失败，使用内置页面作为备用伪装 ${Font}"
+        cat >/home/wwwroot/3DCEList/index.html <<'HTMLEOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Welcome</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{display:flex;justify-content:center;align-items:center;min-height:100vh;
+       background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .card{background:#fff;border-radius:12px;padding:48px 64px;text-align:center;
+        box-shadow:0 4px 24px rgba(0,0,0,.08)}
+  h1{font-size:2rem;color:#1a1a2e;margin-bottom:12px}
+  p{color:#6b7280;font-size:1rem}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Welcome</h1>
+    <p>Service is running normally.</p>
+  </div>
+</body>
+</html>
+HTMLEOF
+        echo -e "${OK} ${GreenBG} 内置伪装页面已生成 ${Font}"
+    fi
 }
 v2ray_install() {
     if [[ -d /root/v2ray ]]; then
@@ -301,18 +320,24 @@ v2ray_install() {
     if [[ -d /etc/v2ray ]]; then
         rm -rf /etc/v2ray
     fi
-    mkdir -p /root/v2ray
-    cd /root/v2ray || exit
-    wget -N --no-check-certificate https://raw.githubusercontent.com/wulabing/V2Ray_ws-tls_bash_onekey/${github_branch}/v2ray.sh
+    rm -rf $v2ray_systemd_file
+    systemctl daemon-reload
 
-    if [[ -f v2ray.sh ]]; then
-        rm -rf $v2ray_systemd_file
-        systemctl daemon-reload
-        bash v2ray.sh --force
-        judge "安装 V2ray"
+    # 主安装源：v2fly 官方安装脚本（官方维护，长期稳定）
+    if bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh); then
+        judge "安装 V2ray (v2fly 官方)"
     else
-        echo -e "${Error} ${RedBG} V2ray 安装文件下载失败，请检查下载地址是否可用 ${Font}"
-        exit 4
+        # 备用安装源：wulabing 脚本
+        echo -e "${Error} ${RedBG} v2fly 官方安装源失败，切换至备用安装源 ${Font}"
+        mkdir -p /root/v2ray && cd /root/v2ray || exit
+        wget -q -N --no-check-certificate https://raw.githubusercontent.com/wulabing/V2Ray_ws-tls_bash_onekey/${github_branch}/v2ray.sh
+        if [[ -f v2ray.sh ]]; then
+            bash v2ray.sh --force
+            judge "安装 V2ray (备用)"
+        else
+            echo -e "${Error} ${RedBG} V2ray 安装失败，请检查网络连接或手动安装 ${Font}"
+            exit 4
+        fi
     fi
     # 清除临时文件
     rm -rf /root/v2ray
@@ -413,15 +438,47 @@ ssl_install() {
     curl https://get.acme.sh | sh
     judge "安装 SSL 证书生成脚本"
 }
+get_public_ip() {
+    local ip
+    # 依次尝试多个公网IP查询服务，任一成功即返回
+    for api in "https://api-ipv4.ip.sb/ip" "https://api4.ipify.org" "https://ipv4.icanhazip.com" "https://ifconfig.me/ip"; do
+        ip=$(curl -s --connect-timeout 5 "$api" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$ip"
+            return
+        fi
+    done
+    echo ""
+}
+resolve_domain_ip() {
+    local d="$1"
+    local ip
+    # 优先用 dig，其次 nslookup，最后 ping（兼容性兜底）
+    if command -v dig &>/dev/null; then
+        ip=$(dig +short "$d" A 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+    fi
+    if [[ -z "$ip" ]] && command -v nslookup &>/dev/null; then
+        ip=$(nslookup "$d" 2>/dev/null | awk '/^Address:/{ip=$2} END{print ip}' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
+    fi
+    if [[ -z "$ip" ]]; then
+        ip=$(ping -c1 -W2 "$d" 2>/dev/null | sed -n 's/.*(\([0-9.]*\)).*/\1/p' | head -1)
+    fi
+    echo "$ip"
+}
 domain_check() {
     if [[ -z "${domain}" ]]; then
         read -rp "请输入你的域名信息(eg:www.wulabing.com):" domain
     else
         echo -e "${OK} ${GreenBG} 使用指定域名: ${domain} ${Font}"
     fi
-    domain_ip=$(ping "${domain}" -c 1 | sed '1{s/[^(]*(//;s/).*//;q}')
+    domain_ip=$(resolve_domain_ip "${domain}")
     echo -e "${OK} ${GreenBG} 正在获取 公网ip 信息，请耐心等待 ${Font}"
-    local_ip=$(curl https://api-ipv4.ip.sb/ip)
+    local_ip=$(get_public_ip)
+    if [[ -z "$local_ip" ]]; then
+        echo -e "${Error} ${RedBG} 无法获取公网IP（所有查询服务均失败），跳过IP匹配检查 ${Font}"
+        sleep 2
+        return
+    fi
     echo -e "域名dns解析IP：${domain_ip}"
     echo -e "本机IP: ${local_ip}"
     sleep 2
@@ -484,7 +541,12 @@ acme() {
 v2ray_conf_add() {
     local mode="$1"
     cd /etc/v2ray || exit
-    wget --no-check-certificate "https://raw.githubusercontent.com/wulabing/V2Ray_ws-tls_bash_onekey/${github_branch}/${mode}/config.json" -O config.json
+    # 主源：自有仓库（vipty/v2ray-setup），长期可用
+    if ! wget -q --no-check-certificate "${self_repo_raw}/${mode}/config.json" -O config.json 2>/dev/null; then
+        # 备用：wulabing 原始仓库
+        echo -e "${Error} ${RedBG} 主源配置下载失败，切换至备用源 ${Font}"
+        wget --no-check-certificate "https://raw.githubusercontent.com/${wulabing_repo}/${github_branch}/${mode}/config.json" -O config.json
+    fi
     modify_path
     modify_alterid
     modify_inbound_port
@@ -594,17 +656,25 @@ nginx_process_disabled() {
 #    judge "rc.local 配置"
 #}
 acme_cron_update() {
-    wget -N -P /usr/bin --no-check-certificate "https://raw.githubusercontent.com/wulabing/V2Ray_ws-tls_bash_onekey/dev/ssl_update.sh"
-    if [[ $(crontab -l 2>/dev/null | grep -c "ssl_update.sh") -lt 1 ]]; then
-      if [[ "${ID}" == "centos" ]]; then
-          #        sed -i "/acme.sh/c 0 3 * * 0 \"/root/.acme.sh\"/acme.sh --cron --home \"/root/.acme.sh\" \
-          #        &> /dev/null" /var/spool/cron/root
-          sed -i "/acme.sh/c 0 3 * * 0 bash ${ssl_update_file}" /var/spool/cron/root
-      else
-          #        sed -i "/acme.sh/c 0 3 * * 0 \"/root/.acme.sh\"/acme.sh --cron --home \"/root/.acme.sh\" \
-          #        &> /dev/null" /var/spool/cron/crontabs/root
-          sed -i "/acme.sh/c 0 3 * * 0 bash ${ssl_update_file}" /var/spool/cron/crontabs/root
-      fi
+    # 本地生成证书续签脚本，不依赖 wulabing 个人仓库的 ssl_update.sh
+    cat >${ssl_update_file} <<'SSLEOF'
+#!/bin/bash
+domain=$(grep '"add"' /usr/local/vmess_qr.json 2>/dev/null | awk -F '"' '{print $4}')
+[[ -z "$domain" ]] && exit 0
+"$HOME/.acme.sh"/acme.sh --cron --home "$HOME/.acme.sh" >/dev/null 2>&1
+"$HOME/.acme.sh"/acme.sh --installcert -d "$domain" \
+    --fullchainpath /data/v2ray.crt --keypath /data/v2ray.key --ecc >/dev/null 2>&1
+systemctl is-active --quiet nginx && systemctl restart nginx
+systemctl is-active --quiet v2ray && systemctl restart v2ray
+SSLEOF
+    chmod +x ${ssl_update_file}
+
+    local cron_file
+    [[ "${ID}" == "centos" ]] && cron_file="/var/spool/cron/root" || cron_file="/var/spool/cron/crontabs/root"
+    if grep -q "ssl_update.sh" "$cron_file" 2>/dev/null; then
+        sed -i "/ssl_update.sh/c 0 3 * * 0 bash ${ssl_update_file}" "$cron_file"
+    else
+        echo "0 3 * * 0 bash ${ssl_update_file}" >>"$cron_file"
     fi
     judge "cron 计划任务更新"
 }
@@ -763,13 +833,22 @@ show_error_log() {
     [ -f ${v2ray_error_log} ] && tail -f ${v2ray_error_log} || echo -e "${RedBG}log文件不存在${Font}"
 }
 ssl_update_manuel() {
-    [ -f ${acme_sh_file} ] && "/root/.acme.sh"/acme.sh --cron --home "/root/.acme.sh" || echo -e "${RedBG}证书签发工具不存在，请确认你是否使用了自己的证书${Font}"
+    if [[ ! -f "$HOME/.acme.sh/acme.sh" ]]; then
+        echo -e "${RedBG}证书签发工具不存在，请确认你是否使用了自己的证书${Font}"
+        return 1
+    fi
+    "$HOME/.acme.sh/acme.sh" --cron --home "$HOME/.acme.sh"
     domain="$(info_extraction '\"add\"')"
-    "$HOME"/.acme.sh/acme.sh --installcert -d "${domain}" --fullchainpath /data/v2ray.crt --keypath /data/v2ray.key --ecc
+    "$HOME/.acme.sh/acme.sh" --installcert -d "${domain}" --fullchainpath /data/v2ray.crt --keypath /data/v2ray.key --ecc
 }
 bbr_boost_sh() {
     [ -f "tcp.sh" ] && rm -rf ./tcp.sh
-    wget -N --no-check-certificate "https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcp.sh" && chmod +x tcp.sh && ./tcp.sh
+    # 主源：ylx2016 的网络加速脚本（第三方）
+    if ! wget -q -N --no-check-certificate "https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcp.sh" 2>/dev/null; then
+        # 备用：自有仓库镜像
+        wget -N --no-check-certificate "${self_repo_raw}/tools/tcp.sh"
+    fi
+    [[ -f tcp.sh ]] && chmod +x tcp.sh && ./tcp.sh
 }
 mtproxy_sh() {
     echo -e "${Error} ${RedBG} 功能维护，暂不可用 ${Font}"
@@ -825,8 +904,62 @@ judge_mode() {
         fi
     fi
 }
+enable_bbr() {
+    modprobe tcp_bbr 2>/dev/null
+    sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+    sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+    echo "net.core.default_qdisc=fq" >>/etc/sysctl.conf
+    echo "net.ipv4.tcp_congestion_control=bbr" >>/etc/sysctl.conf
+    sysctl -p >/dev/null 2>&1
+    if sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null | grep -q "bbr"; then
+        echo -e "${OK} ${GreenBG} BBR 加速启用成功（立即生效，无需重启）${Font}"
+    else
+        echo -e "${Error} ${RedBG} BBR 启用失败，内核可能不支持，建议通过菜单选项11安装加速脚本 ${Font}"
+    fi
+}
+check_kernel_and_recommend_bbr() {
+    local kver major minor current_cc
+    kver=$(uname -r | sed 's/[-+].*//')
+    major=$(echo "$kver" | cut -d'.' -f1)
+    minor=$(echo "$kver" | cut -d'.' -f2)
+    current_cc=$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)
+
+    echo -e ""
+    echo -e "—————————————— 内核与加速分析 ——————————————"
+    echo -e "${OK} ${GreenBG} 内核版本: $(uname -r) ${Font}"
+    echo -e "${OK} ${GreenBG} 当前拥塞控制: ${current_cc:-未知} ${Font}"
+
+    if [[ "$current_cc" == "bbr" ]]; then
+        echo -e "${OK} ${GreenBG} BBR 已启用，无需重复配置 ${Font}"
+        echo -e "—————————————————————————————————————————"
+        return 0
+    fi
+
+    if [[ $major -gt 4 ]] || [[ $major -eq 4 && $minor -ge 9 ]]; then
+        echo -e "${OK} ${GreenBG} 推荐: 原生 BBR（Google研发，内核已内置，无第三方依赖，最稳定可靠）${Font}"
+        if [[ $major -ge 5 ]]; then
+            echo -e "${OK} ${GreenBG} 内核 ≥ 5.x，BBR 支持更完善，强烈推荐启用 ${Font}"
+        fi
+        read -rp "$(echo -e "${GreenBG} 是否立即一键启用 BBR？(Y/n): ${Font}")" bbr_yn
+        [[ -z "$bbr_yn" ]] && bbr_yn="Y"
+        case $bbr_yn in
+        [yY][eE][sS] | [yY])
+            enable_bbr
+            ;;
+        *)
+            echo -e "${OK} ${GreenBG} 跳过 BBR 配置，可后续从菜单选项11安装加速脚本 ${Font}"
+            ;;
+        esac
+    else
+        echo -e "${Error} ${RedBG} 内核 ${kver} < 4.9，不支持原生 BBR ${Font}"
+        echo -e "${Error} ${RedBG} 推荐：菜单选项11安装 BBR Plus/锐速，或先升级内核到 4.9+ ${Font}"
+    fi
+    echo -e "—————————————————————————————————————————"
+    sleep 2
+}
 install_v2ray_ws_tls() {
     is_root
+    check_kernel_and_recommend_bbr
     check_system
     chrony_install
     dependency_install
@@ -855,6 +988,7 @@ install_v2ray_ws_tls() {
 }
 install_v2_h2() {
     is_root
+    check_kernel_and_recommend_bbr
     check_system
     chrony_install
     dependency_install
@@ -876,7 +1010,12 @@ install_v2_h2() {
 
 }
 update_sh() {
-    ol_version=$(curl -L -s https://raw.githubusercontent.com/wulabing/V2Ray_ws-tls_bash_onekey/${github_branch}/install.sh | grep "shell_version=" | head -1 | awk -F '=|"' '{print $3}')
+    # 主源：自有仓库（vipty/v2ray-setup）
+    ol_version=$(curl -L -s "${self_repo_raw}/install.sh" 2>/dev/null | grep "shell_version=" | head -1 | awk -F '=|"' '{print $3}')
+    if [[ -z "$ol_version" ]]; then
+        # 备用：wulabing 原始仓库
+        ol_version=$(curl -L -s "https://raw.githubusercontent.com/${wulabing_repo}/${github_branch}/install.sh" | grep "shell_version=" | head -1 | awk -F '=|"' '{print $3}')
+    fi
     echo "$ol_version" >$version_cmp
     echo "$shell_version" >>$version_cmp
     if [[ "$shell_version" < "$(sort -rV $version_cmp | head -1)" ]]; then
@@ -884,7 +1023,7 @@ update_sh() {
         read -r update_confirm
         case $update_confirm in
         [yY][eE][sS] | [yY])
-            wget -N --no-check-certificate https://raw.githubusercontent.com/wulabing/V2Ray_ws-tls_bash_onekey/${github_branch}/install.sh
+            wget -N --no-check-certificate "${self_repo_raw}/install.sh"
             echo -e "${OK} ${GreenBG} 更新完成 ${Font}"
             exit 0
             ;;
@@ -950,13 +1089,14 @@ menu() {
     echo -e "${Green}9.${Font}  查看 实时错误日志"
     echo -e "${Green}10.${Font} 查看 V2Ray 配置信息"
     echo -e "—————————————— 其他选项 ——————————————"
-    echo -e "${Green}11.${Font} 安装 4合1 bbr 锐速安装脚本"
+    echo -e "${Green}11.${Font} 安装 4合1 bbr 锐速安装脚本（第三方脚本）"
     echo -e "${Green}12.${Font} 安装 MTproxy(支持TLS混淆)"
     echo -e "${Green}13.${Font} 证书 有效期更新"
     echo -e "${Green}14.${Font} 卸载 V2Ray"
     echo -e "${Green}15.${Font} 更新 证书crontab计划任务"
     echo -e "${Green}16.${Font} 清空 证书遗留文件"
-    echo -e "${Green}17.${Font} 退出 \n"
+    echo -e "${Green}17.${Font} 退出"
+    echo -e "${Green}19.${Font} 内核分析 & 一键启用 BBR 加速 \n"
 
     read -rp "请输入数字：" menu_num
     case $menu_num in
@@ -972,7 +1112,7 @@ menu() {
         install_v2_h2
         ;;
     3)
-        bash <(curl -L -s https://raw.githubusercontent.com/wulabing/V2Ray_ws-tls_bash_onekey/${github_branch}/v2ray.sh)
+        bash <(curl -L https://raw.githubusercontent.com/v2fly/fhs-install-v2ray/master/install-release.sh)
         ;;
     4)
         read -rp "请输入UUID:" UUID
@@ -1040,6 +1180,9 @@ menu() {
         modify_camouflage_path
         start_process_systemd
         ;;
+    19)
+        check_kernel_and_recommend_bbr
+        ;;
     *)
         echo -e "${RedBG}请输入正确的数字${Font}"
         ;;
@@ -1048,11 +1191,17 @@ menu() {
 
 # 解析命令行参数
 # 支持 --host <domain> 指定域名，跳过交互式输入
+# 支持 --mode <ws|h2> 直接启动安装，跳过菜单
 SUBCMD=""
+install_mode=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --host)
             domain="$2"
+            shift 2
+            ;;
+        --mode)
+            install_mode="$2"
             shift 2
             ;;
         *)
@@ -1063,4 +1212,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 judge_mode
-list "${SUBCMD}"
+
+# 若指定了 --mode，直接执行对应安装流程（无需交互菜单）
+if [[ -n "$install_mode" ]]; then
+    case "$install_mode" in
+        ws)
+            shell_mode="ws"
+            install_v2ray_ws_tls
+            ;;
+        h2)
+            shell_mode="h2"
+            install_v2_h2
+            ;;
+        *)
+            echo -e "${Error} ${RedBG} 未知 --mode 值：${install_mode}，可选：ws / h2 ${Font}"
+            exit 1
+            ;;
+    esac
+else
+    list "${SUBCMD}"
+fi
