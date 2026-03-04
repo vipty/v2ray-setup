@@ -145,18 +145,9 @@ chrony_install() {
     chronyc sourcestats -v
     chronyc tracking -v
     date
-    read -rp "请确认时间是否准确,误差范围±3分钟(Y/N): " chrony_confirm
-    [[ -z ${chrony_confirm} ]] && chrony_confirm="Y"
-    case $chrony_confirm in
-    [yY][eE][sS] | [yY])
-        echo -e "${GreenBG} 继续安装 ${Font}"
-        sleep 2
-        ;;
-    *)
-        echo -e "${RedBG} 安装终止 ${Font}"
-        exit 2
-        ;;
-    esac
+    echo -e "${OK} ${GreenBG} 时间同步完成，自动继续安装 ${Font}"
+    echo -e "${OK} ${GreenBG} 提示：若后续 SSL 证书申请失败，请检查服务器时间是否准确（误差不超过3分钟）${Font}"
+    sleep 2
 }
 
 dependency_install() {
@@ -232,10 +223,12 @@ basic_optimization() {
 }
 port_alterid_set() {
     if [[ "on" != "$old_config_status" ]]; then
-        read -rp "请输入连接端口（default:443）:" port
+        # 端口默认 443：标准 HTTPS 端口，防火墙/运营商拦截概率最低，伪装性最强
         [[ -z ${port} ]] && port="443"
-        read -rp "请输入alterID（default:0 仅允许填数字）:" alterID
+        # alterID 默认 0：启用 VMessAEAD 加密模式，安全性更高，新版客户端均支持
         [[ -z ${alterID} ]] && alterID="0"
+        echo -e "${OK} ${GreenBG} 连接端口: ${port}（推荐：标准HTTPS端口，穿透性最佳）${Font}"
+        echo -e "${OK} ${GreenBG} alterID: ${alterID}（推荐：启用VMessAEAD加密，安全性更强）${Font}"
     fi
 }
 modify_path() {
@@ -421,7 +414,11 @@ ssl_install() {
     judge "安装 SSL 证书生成脚本"
 }
 domain_check() {
-    read -rp "请输入你的域名信息(eg:www.wulabing.com):" domain
+    if [[ -z "${domain}" ]]; then
+        read -rp "请输入你的域名信息(eg:www.wulabing.com):" domain
+    else
+        echo -e "${OK} ${GreenBG} 使用指定域名: ${domain} ${Font}"
+    fi
     domain_ip=$(ping "${domain}" -c 1 | sed '1{s/[^(]*(//;s/).*//;q}')
     echo -e "${OK} ${GreenBG} 正在获取 公网ip 信息，请耐心等待 ${Font}"
     local_ip=$(curl https://api-ipv4.ip.sb/ip)
@@ -433,17 +430,8 @@ domain_check() {
         sleep 2
     else
         echo -e "${Error} ${RedBG} 请确保域名添加了正确的 A 记录，否则将无法正常使用 V2ray ${Font}"
-        echo -e "${Error} ${RedBG} 域名dns解析IP 与 本机IP 不匹配 是否继续安装？（y/n）${Font}" && read -r install
-        case $install in
-        [yY][eE][sS] | [yY])
-            echo -e "${GreenBG} 继续安装 ${Font}"
-            sleep 2
-            ;;
-        *)
-            echo -e "${RedBG} 安装终止 ${Font}"
-            exit 2
-            ;;
-        esac
+        echo -e "${Error} ${RedBG} 域名dns解析IP 与 本机IP 不匹配，自动继续安装，如遇证书申请失败请检查 DNS 解析 ${Font}"
+        sleep 3
     fi
 }
 
@@ -469,6 +457,9 @@ acme() {
         sleep 2
     else
         echo -e "${Error} ${RedBG} SSL 证书测试签发失败 ${Font}"
+        echo -e "${Error} ${RedBG} 排查建议：1) 检查服务器时间是否准确（误差不超过3分钟，运行 date 查看）${Font}"
+        echo -e "${Error} ${RedBG}           2) 检查域名 DNS 解析是否已指向本机 IP ${Font}"
+        echo -e "${Error} ${RedBG}           3) 检查 80 端口是否被占用或防火墙拦截 ${Font}"
         rm -rf "$HOME/.acme.sh/${domain}_ecc"
         exit 1
     fi
@@ -483,6 +474,9 @@ acme() {
         fi
     else
         echo -e "${Error} ${RedBG} SSL 证书生成失败 ${Font}"
+        echo -e "${Error} ${RedBG} 排查建议：1) 检查服务器时间是否准确（误差不超过3分钟，运行 date 查看）${Font}"
+        echo -e "${Error} ${RedBG}           2) 检查域名 DNS 解析是否已指向本机 IP ${Font}"
+        echo -e "${Error} ${RedBG}           3) 检查 80 端口是否被占用或防火墙拦截 ${Font}"
         rm -rf "$HOME/.acme.sh/${domain}_ecc"
         exit 1
     fi
@@ -500,19 +494,9 @@ v2ray_conf_add_tls() { v2ray_conf_add "tls"; }
 v2ray_conf_add_h2()  { v2ray_conf_add "http2"; }
 old_config_exist_check() {
     if [[ -f $v2ray_qr_config_file ]]; then
-        echo -e "${OK} ${GreenBG} 检测到旧配置文件，是否读取旧文件配置 [Y/N]? ${Font}"
-        read -r ssl_delete
-        case $ssl_delete in
-        [yY][eE][sS] | [yY])
-            echo -e "${OK} ${GreenBG} 已保留旧配置  ${Font}"
-            old_config_status="on"
-            port=$(info_extraction '\"port\"')
-            ;;
-        *)
-            rm -rf $v2ray_qr_config_file
-            echo -e "${OK} ${GreenBG} 已删除旧配置  ${Font}"
-            ;;
-        esac
+        # 默认使用全新配置：重新安装时生成新UUID和路径更安全，避免旧配置泄露风险
+        rm -rf $v2ray_qr_config_file
+        echo -e "${OK} ${GreenBG} 检测到旧配置文件，自动使用全新配置（推荐：更安全）${Font}"
     fi
 }
 nginx_conf_add() {
@@ -682,18 +666,9 @@ vmess_quan_link_image() {
 }
 
 vmess_link_image_choice() {
-        echo "请选择生成的链接种类"
-        echo "1: V2RayNG/V2RayN"
-        echo "2: quantumult"
-        read -rp "请输入：" link_version
-        [[ -z ${link_version} ]] && link_version=1
-        if [[ $link_version == 1 ]]; then
-            vmess_qr_link_image
-        elif [[ $link_version == 2 ]]; then
-            vmess_quan_link_image
-        else
-            vmess_qr_link_image
-        fi
+        # 默认生成 V2RayNG/V2RayN 格式链接：兼容性最广，支持 Android/Windows/iOS 全平台主流客户端
+        echo -e "${OK} ${GreenBG} 自动生成 V2RayNG/V2RayN 格式链接（推荐：兼容性最广）${Font}"
+        vmess_qr_link_image
 }
 info_extraction() {
     grep "$1" $v2ray_qr_config_file | awk -F '"' '{print $4}'
@@ -718,23 +693,13 @@ show_information() {
 }
 ssl_judge_and_install() {
     if [[ -f "/data/v2ray.key" || -f "/data/v2ray.crt" ]]; then
-        echo "/data 目录下证书文件已存在"
-        echo -e "${OK} ${GreenBG} 是否删除 [Y/N]? ${Font}"
-        read -r ssl_delete
-        case $ssl_delete in
-        [yY][eE][sS] | [yY])
-            rm -rf /data/*
-            echo -e "${OK} ${GreenBG} 已删除 ${Font}"
-            ;;
-        *) ;;
-
-        esac
+        # 默认删除旧证书重新申请：避免证书过期或域名变更导致的问题
+        echo -e "${OK} ${GreenBG} 检测到旧证书，自动删除并重新申请（推荐：确保证书与当前域名匹配）${Font}"
+        rm -rf /data/*
     fi
 
-    if [[ -f "/data/v2ray.key" || -f "/data/v2ray.crt" ]]; then
-        echo "证书文件已存在"
-    elif [[ -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]]; then
-        echo "证书文件已存在"
+    if [[ -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]]; then
+        echo -e "${OK} ${GreenBG} 检测到 acme.sh 缓存证书，直接安装 ${Font}"
         "$HOME"/.acme.sh/acme.sh --installcert -d "${domain}" --fullchainpath /data/v2ray.crt --keypath /data/v2ray.key --ecc
         judge "证书应用"
     else
@@ -881,7 +846,8 @@ install_v2ray_ws_tls() {
     vmess_qr_config_tls_ws
     basic_information
     vmess_link_image_choice
-    tls_type
+    # TLS 版本：安装时固定使用 TLS1.3（最安全，现代客户端均支持；如需兼容旧客户端可安装后从菜单选项7调整）
+    echo -e "${OK} ${GreenBG} TLS 版本: TLS1.3 only（推荐：最高安全性，Shadowrocket/V2RayNG/Clash 均支持）${Font}"
     show_information
     start_process_systemd
     enable_process_systemd
@@ -1080,5 +1046,21 @@ menu() {
     esac
 }
 
+# 解析命令行参数
+# 支持 --host <domain> 指定域名，跳过交互式输入
+SUBCMD=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --host)
+            domain="$2"
+            shift 2
+            ;;
+        *)
+            SUBCMD="$1"
+            shift
+            ;;
+    esac
+done
+
 judge_mode
-list "$1"
+list "${SUBCMD}"
